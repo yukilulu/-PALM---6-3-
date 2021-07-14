@@ -8,7 +8,7 @@
 -|data
 -|work
 -README.MD
--xxx.ipynb
+-飞桨常规赛：PALM眼底彩照视盘探测与分割 - 6月第3名方案.ipynb
 ```
 ### 飞桨常规赛：PALM眼底彩照视盘探测与分割
 ### [链接地址](https://aistudio.baidu.com/aistudio/competition/detail/87)
