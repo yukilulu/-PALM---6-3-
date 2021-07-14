@@ -55,3 +55,158 @@ Disc_Masks文件夹内包含fundus_images里眼底彩照的视盘分割金标准
 %cd PaddleSeg
 %pwd
 !pip install -r requirements.txt
+
+#解压数据
+!unzip -o data/data86770/seg.zip -d /home/aistudio/work
+
+### 生成train.txt 和val.txt
+import random
+import os
+random.seed(2020)
+mask_dir  = '/home/aistudio/work/seg/Train/masks'
+img_dir = '/home/aistudio/work/seg/Train/fundus_image'
+path_list = list()
+for img in os.listdir(img_dir):
+    img_path = os.path.join(img_dir,img)
+    mask_path = os.path.join(mask_dir,img.replace('jpg', 'png'))
+    path_list.append((img_path, mask_path))
+random.shuffle(path_list)
+ratio = 0.7
+train_f = open('/home/aistudio/work/seg/Train/train.txt','w') 
+val_f = open('/home/aistudio/work/seg/Train/val.txt' ,'w')
+
+for i ,content in enumerate(path_list):
+    img, mask = content
+    text = img + ' ' + mask + '\n'
+    if i < len(path_list) * ratio:
+        train_f.write(text)
+    else:
+        val_f.write(text)
+train_f.close()
+val_f.close()
+
+### 配置文件如下
+#### batch_size可以适当调大
+```
+batch_size: 4
+iters: 16000
+
+train_dataset:
+  type: Dataset
+  dataset_root: /home/aistudio/work/seg/Train/
+  train_path: /home/aistudio/work/seg/Train/train.txt
+  num_classes: 2
+  transforms:
+    - type: Resize
+      target_size: [512, 512]
+    - type: RandomHorizontalFlip
+    - type: RandomDistort
+      brightness_range: 0.4
+      contrast_range: 0.4
+      saturation_range: 0.4
+    - type: Normalize
+  mode: train
+
+val_dataset:
+  type: Dataset
+  dataset_root: /home/aistudio/work/seg/Train/
+  val_path: /home/aistudio/work/seg/Train/val.txt
+  num_classes: 2
+  transforms:
+    - type: Resize
+      target_size: [512, 512]
+    - type: Normalize
+  mode: val
+
+
+optimizer:
+  type: sgd
+  momentum: 0.9
+  weight_decay: 4.0e-5
+
+learning_rate:
+  value: 0.00125
+  decay:
+    type: poly
+    power: 0.9
+    end_lr: 0.0
+
+loss:
+  types:
+    - type: MixedLoss
+      losses:
+        - type: CrossEntropyLoss
+        - type: DiceLoss
+      coef: [4.0, 2.0]
+  coef: [1]
+
+model:
+  type: AttentionUNet
+  num_classes: 2
+  pretrained: attentionunet_13000.pdparams
+
+```
+
+### 开始训练
+%cd /home/aistudio/PaddleSeg
+
+### 验证
+!python val.py --config configs/attentionunet_PALM.yml  --model_path output_attentionunet_PALMoutput/best_model/model.pdparams 
+
+### 预测
+!python predict.py \
+       --config configs/attentionunet_PALM.yml \
+       --model_path output_attentionunet_PALMoutput/best_model/model.pdparams \
+       --image_path /home/aistudio/work/seg/test \
+       --save_dir output_attentionunet_PALMoutput/result
+
+### 生成结果
+import os 
+import cv2
+result_path = '/home/aistudio/PaddleSeg/output_attentionunet_PALMoutput/result/pseudo_color_prediction'
+dist_path = '/home/aistudio/Disc_Segmentation'
+for img_name in os.listdir(result_path):
+    img_path = os.path.join(result_path, img_name)
+    img = cv2.imread(img_path)
+    g  = img[:,:,1]
+    ret, result = cv2.threshold(g, 127,255, cv2.THRESH_BINARY_INV)
+    cv2.imwrite(os.path.join(dist_path,img_name), result)
+
+### 假如预测中出现多个不连通的区域，只保留最大的区域
+import os 
+import cv2
+import matplotlib.pyplot as plt
+def cnt_area(cnt):
+    area = cv2.contourArea(cnt)
+    return area
+
+result_path = '/home/aistudio/PaddleSeg/output_attentionunet_PALMoutput/result/pseudo_color_prediction'
+dist_path = '/home/aistudio/Disc_Segmentation'
+for img_name in os.listdir(result_path):
+    img_path = os.path.join(result_path, img_name)
+    img = cv2.imread(img_path)
+    g  = img[:,:,1]
+    ret, threshold = cv2.threshold(g, 127,255, cv2.THRESH_BINARY)
+
+
+    contours, hierarch = cv2.findContours(threshold, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
+    contours.sort(key=cnt_area, reverse=True)
+    if len(contours) > 1:
+        for i in range(1,len(contours)):
+            cv2.drawContours(threshold, [contours[i]], 0, 0, -1)
+    _,result = cv2.threshold(threshold, 127, 255, cv2.THRESH_BINARY_INV)
+    cv2.imwrite(os.path.join(dist_path, img_name), result)
+    
+### 总结
+本次参数
+模型构建思路及调优过程（可具体包括：思路框架图、思路步骤详述、模型应用+调优过程）
+
+【模型】UnetAttention
+
+【数据增强】图片大小512x512，水平翻转，对比度随机改变等数据增强
+
+【对预测结果进行处理】假如预测中出现多个不连通的区域，只保留最大的区域
+
+【提高】其实可以尝试多一些数据增强，但是我在本次中没有尝试其他的
+
+【参考】https://aistudio.baidu.com/aistudio/projectdetail/2184492?forkThirdPart=1
